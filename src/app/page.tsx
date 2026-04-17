@@ -827,7 +827,7 @@ useEffect(() => {
                         Generating...
                       </>
                     ) : (
-                      `Generate Games (${Math.floor(players.length / 4)} possible)`
+                      `Generate Player Pairings (${Math.floor(players.length / 4)} possible)`
                     )}
                   </button>
                 </div>
@@ -979,14 +979,6 @@ useEffect(() => {
                         >
                           Start Game
                         </button>
-                      )}
-
-                      {currentGame.status === 'finished' && (
-                        <div className="text-center py-4">
-                          <div className="text-3xl font-black text-green-600 mb-4">
-                            GAME OVER
-                          </div>
-                        </div>
                       )}
 
                       {showWinnerModal && currentGame.status === 'finished' && (
@@ -1234,7 +1226,7 @@ useEffect(() => {
                             Generating...
                           </>
                         ) : (
-                          'Regenerate Pairing'
+                          'Shuffle Pairings'
                         )}
                       </button>
                     )}
