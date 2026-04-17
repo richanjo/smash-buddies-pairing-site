@@ -81,30 +81,14 @@ function generateTeams(players: Player[], gameMode: GameMode): { teamA: Player[]
 
   for (let i = 0; i < Math.min(100, shuffled.length); i++) {
     const candidates = shuffleArray(shuffled).slice(0, 4);
-    if (gameMode === "Mixed Doubles") {
-      const males = candidates.filter((p) => p.gender === 'Male');
-      const females = candidates.filter((p) => p.gender === 'Female');
-      if (males.length !== 2 || females.length !== 2) continue;
-      
-      const teamA: Player[] = [males[0], females[0]];
-      const teamB: Player[] = [males[1], females[1]];
-      const diff = Math.abs(getTeamSkill(teamA) - getTeamSkill(teamB));
-      
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTeamA = teamA;
-        bestTeamB = teamB;
-      }
-    } else {
-      const teamA: Player[] = [candidates[0], candidates[1]];
-      const teamB: Player[] = [candidates[2], candidates[3]];
-      const diff = Math.abs(getTeamSkill(teamA) - getTeamSkill(teamB));
-      
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTeamA = teamA;
-        bestTeamB = teamB;
-      }
+    const teamA: Player[] = [candidates[0], candidates[1]];
+    const teamB: Player[] = [candidates[2], candidates[3]];
+    const diff = Math.abs(getTeamSkill(teamA) - getTeamSkill(teamB));
+    
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestTeamA = teamA;
+      bestTeamB = teamB;
     }
   }
 
@@ -143,37 +127,75 @@ export default function Home() {
   const [editingTeamB, setEditingTeamB] = useState<Player[]>([]);
   const [showWinnerModal, setShowWinnerModal] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [completedGames, setCompletedGames] = useState<Set<number>>(new Set());
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    localStorage.setItem('pickleball_players', JSON.stringify(players));
+  }, [players, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    localStorage.setItem('pickleball_games', JSON.stringify(games));
+  }, [games, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    localStorage.setItem('pickleball_target_score', targetScore.toString());
+  }, [targetScore, isLoaded]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    localStorage.setItem('pickleball_current_game_index', currentGameIndex.toString());
+  }, [currentGameIndex, isLoaded]);
+
+  useEffect(() => {
+    const cachedCompletedGames = localStorage.getItem('pickleball_completed_games');
+    if (cachedCompletedGames) {
+      setCompletedGames(new Set(JSON.parse(cachedCompletedGames)));
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('pickleball_completed_games', JSON.stringify([...completedGames]));
+  }, [completedGames]);
 
   const currentGame = games[currentGameIndex] || null;
 
 useEffect(() => {
-  const handlePreventBack = () => {
+    const isLoggedIn = localStorage.getItem('pickleball_logged_in');
+    if (isLoggedIn !== 'true') {
+      window.location.href = '/login';
+      return;
+    }
+    document.cookie = 'pickleball_logged_in=true; path=/';
+    const email = localStorage.getItem('pickleball_user_email') || '';
+    setUserEmail(email);
+
+    const cachedPlayers = localStorage.getItem('pickleball_players');
+    const cachedGames = localStorage.getItem('pickleball_games');
+    const cachedTargetScore = localStorage.getItem('pickleball_target_score');
+    const cachedCurrentGameIndex = localStorage.getItem('pickleball_current_game_index');
+    
+    if (cachedPlayers) setPlayers(JSON.parse(cachedPlayers));
+    if (cachedGames) setGames(JSON.parse(cachedGames));
+    if (cachedTargetScore) setTargetScore(parseInt(cachedTargetScore));
+    if (cachedCurrentGameIndex) setCurrentGameIndex(parseInt(cachedCurrentGameIndex));
+
+    const handlePreventBack = () => {
+      window.history.pushState(null, '', window.location.href);
+    };
+
     window.history.pushState(null, '', window.location.href);
-  };
-
-  const isLoggedIn = localStorage.getItem('pickleball_logged_in');
-  if (isLoggedIn !== 'true') {
-    window.location.href = '/login';
-    return;
-  }
-  document.cookie = 'pickleball_logged_in=true; path=/';
-  const email = localStorage.getItem('pickleball_user_email') || '';
-  setUserEmail(email);
-
-  const cachedPlayers = localStorage.getItem('pickleball_players');
-  const cachedGames = localStorage.getItem('pickleball_games');
-  const cachedTargetScore = localStorage.getItem('pickleball_target_score');
-  const cachedCurrentGameIndex = localStorage.getItem('pickleball_current_game_index');
-  
-  if (cachedPlayers) setPlayers(JSON.parse(cachedPlayers));
-  if (cachedGames) setGames(JSON.parse(cachedGames));
-  if (cachedTargetScore) setTargetScore(parseInt(cachedTargetScore));
-  if (cachedCurrentGameIndex) setCurrentGameIndex(parseInt(cachedCurrentGameIndex));
-
-  window.history.pushState(null, '', window.location.href);
-  window.addEventListener('popstate', handlePreventBack);
-  return () => window.removeEventListener('popstate', handlePreventBack);
-}, [router]);
+    window.addEventListener('popstate', handlePreventBack);
+    return () => window.removeEventListener('popstate', handlePreventBack);
+  }, [router]);
 
   useEffect(() => {
     if (timerRunning && currentGame?.status === 'active') {
@@ -223,6 +245,10 @@ useEffect(() => {
     setPlayers(players.map(p => p.id === id ? { ...p, skill } : p));
   };
 
+  const updatePlayerGender = (id: string, gender: Gender) => {
+    setPlayers(players.map(p => p.id === id ? { ...p, gender } : p));
+  };
+
   const generateAllGames = () => {
     const score = customScore ? parseInt(customScore) : targetScore;
     if (isNaN(score) || score < 1) {
@@ -241,55 +267,61 @@ useEffect(() => {
       return;
     }
 
-    const allGames: Game[] = [];
-    const playerRotation: Player[] = [...filteredPlayers];
-    let gameNum = 1;
+    setIsGenerating(true);
 
-    while (playerRotation.length >= 4) {
-      const result = generateTeams(playerRotation, gameMode);
-      if (result.teamA.length === 0) break;
+    setTimeout(() => {
+      const allGames: Game[] = [];
+      const playerRotation: Player[] = [...filteredPlayers];
+      let gameNum = 1;
 
-      allGames.push({
-        id: gameNum,
-        teamA: { players: result.teamA, score: 0 },
-        teamB: { players: result.teamB, score: 0 },
-        targetScore: score,
-        status: 'pending',
-        winner: null,
-      });
+      while (playerRotation.length >= 4) {
+        const result = generateTeams(playerRotation, gameMode);
+        if (result.teamA.length === 0) break;
 
-      const usedIds = new Set([...result.teamA, ...result.teamB].map(p => p.id));
-      const remaining = playerRotation.filter(p => !usedIds.has(p.id));
-      
-      if (remaining.length < 4 && gameNum < 10) {
-        const rotationPlayers = [...remaining, ...playerRotation.slice(0, 4)];
-        const newRotation = generateTeams(rotationPlayers, gameMode);
-        if (newRotation.teamA.length >= 4) {
-          playerRotation.length = 0;
-          playerRotation.push(...newRotation.teamA, ...newRotation.teamB, ...remaining);
+        allGames.push({
+          id: gameNum,
+          teamA: { players: result.teamA, score: 0 },
+          teamB: { players: result.teamB, score: 0 },
+          targetScore: score,
+          status: 'pending',
+          winner: null,
+        });
+
+        const usedIds = new Set([...result.teamA, ...result.teamB].map(p => p.id));
+        const remaining = playerRotation.filter(p => !usedIds.has(p.id));
+        
+        if (remaining.length < 4 && gameNum < 10) {
+          const rotationPlayers = [...remaining, ...playerRotation.slice(0, 4)];
+          const newRotation = generateTeams(rotationPlayers, gameMode);
+          if (newRotation.teamA.length >= 4) {
+            playerRotation.length = 0;
+            playerRotation.push(...newRotation.teamA, ...newRotation.teamB, ...remaining);
+          } else {
+            break;
+          }
         } else {
-          break;
+          playerRotation.length = 0;
+          playerRotation.push(...remaining);
         }
-      } else {
-        playerRotation.length = 0;
-        playerRotation.push(...remaining);
+        
+        gameNum++;
       }
-      
-      gameNum++;
-    }
 
-    if (allGames.length === 0) {
-      alert('Not enough players to generate any games');
-      return;
-    }
+      if (allGames.length === 0) {
+        alert('Not enough players to generate any games');
+        setIsGenerating(false);
+        return;
+      }
 
-    setGames(allGames);
-    setTargetScore(score);
-    setCurrentGameIndex(0);
-    setTimer(0);
-    setTimerRunning(false);
-    setHistory([]);
-    setActiveTab('game');
+      setGames(allGames);
+      setTargetScore(score);
+      setCurrentGameIndex(0);
+      setTimer(0);
+      setTimerRunning(false);
+      setHistory([]);
+      setActiveTab('game');
+      setIsGenerating(false);
+    }, 1000);
   };
 
   const startGame = () => {
@@ -413,6 +445,31 @@ useEffect(() => {
     setTimerRunning(false);
   };
 
+  const handleGameDone = (gameId: number) => {
+    setCompletedGames(prev => new Set(prev).add(gameId));
+  };
+
+  const handleNewSet = (gameId: number) => {
+    const game = games.find(g => g.id === gameId);
+    if (!game) return;
+
+    const newGameId = Math.max(...games.map(g => g.id), 0) + 1;
+    const newGame: Game = {
+      id: newGameId,
+      teamA: { players: [...game.teamA.players], score: 0 },
+      teamB: { players: [...game.teamB.players], score: 0 },
+      targetScore: game.targetScore,
+      status: 'pending',
+      winner: null,
+      gameTime: 0,
+      teamAScore: 0,
+      teamBScore: 0
+    };
+
+    setGames([...games, newGame]);
+    setCompletedGames(prev => new Set(prev).add(gameId));
+  };
+
   const resetAll = () => {
     const score = customScore ? parseInt(customScore) : targetScore;
     if (isNaN(score) || score < 1) {
@@ -491,45 +548,50 @@ useEffect(() => {
       return;
     }
 
-    // Shuffle all players and generate new games
-    const shuffled = shuffleArray(filteredPlayers);
-    const allGames: Game[] = [];
-    let gameNum = 1;
-    let availablePlayers: Player[] = [...shuffled];
-    
-    while (availablePlayers.length >= 4) {
-      const result = generateTeams(availablePlayers, gameMode);
-      if (result.teamA.length === 0) break;
+    setIsGenerating(true);
 
-      allGames.push({
-        id: gameNum,
-        teamA: { players: result.teamA, score: 0 },
-        teamB: { players: result.teamB, score: 0 },
-        targetScore: score,
-        status: 'pending',
-        winner: null,
-        gameTime: 0,
-        teamAScore: 0,
-        teamBScore: 0
-      });
+    setTimeout(() => {
+      const shuffled = shuffleArray(filteredPlayers);
+      const allGames: Game[] = [];
+      let gameNum = 1;
+      let availablePlayers: Player[] = [...shuffled];
+      
+      while (availablePlayers.length >= 4) {
+        const result = generateTeams(availablePlayers, gameMode);
+        if (result.teamA.length === 0) break;
 
-      const usedIds = new Set([...result.teamA, ...result.teamB].map(p => p.id));
-      availablePlayers = availablePlayers.filter(p => !usedIds.has(p.id));
-      gameNum++;
-    }
+        allGames.push({
+          id: gameNum,
+          teamA: { players: result.teamA, score: 0 },
+          teamB: { players: result.teamB, score: 0 },
+          targetScore: score,
+          status: 'pending',
+          winner: null,
+          gameTime: 0,
+          teamAScore: 0,
+          teamBScore: 0
+        });
 
-    if (allGames.length === 0) {
-      alert('Cannot generate games');
-      return;
-    }
+        const usedIds = new Set([...result.teamA, ...result.teamB].map(p => p.id));
+        availablePlayers = availablePlayers.filter(p => !usedIds.has(p.id));
+        gameNum++;
+      }
 
-    setGames(allGames);
-    setTargetScore(score);
-    setCurrentGameIndex(0);
-    setTimer(0);
-    setTimerRunning(false);
-    setHistory([]);
-    setActiveTab('game');
+      if (allGames.length === 0) {
+        alert('Cannot generate games');
+        setIsGenerating(false);
+        return;
+      }
+
+      setGames(allGames);
+      setTargetScore(score);
+      setCurrentGameIndex(0);
+      setTimer(0);
+      setTimerRunning(false);
+      setHistory([]);
+      setActiveTab('game');
+      setIsGenerating(false);
+    }, 1000);
   };
 
   const malePlayers = players.filter(p => p.gender === 'Male');
@@ -664,7 +726,16 @@ useEffect(() => {
                               ))}
                             </select>
                           </td>
-                          <td className="px-3 py-2 font-bold text-zinc-600">{player.gender}</td>
+                          <td className="px-3 py-2">
+                            <select
+                              value={player.gender}
+                              onChange={(e) => updatePlayerGender(player.id, e.target.value as Gender)}
+                              className="px-2 py-1 text-xs bg-black border border-zinc-700 rounded-lg focus:border-green-500 focus:outline-none text-white font-bold"
+                            >
+                              <option value="Male">Male</option>
+                              <option value="Female">Female</option>
+                            </select>
+                          </td>
                           <td className="px-3 py-2 text-center font-bold text-zinc-800">{getGamesPlayed(player.id)}</td>
                           <td className="px-3 py-2 text-right">
                             <button
@@ -744,17 +815,27 @@ useEffect(() => {
 
                   <button
                     onClick={generateAllGames}
-                    disabled={players.length < 4 || games.some(game => game.status === 'active')}
-                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-black py-4 rounded-xl transition-all"
+                    disabled={players.length < 4 || games.some(game => game.status === 'active') || isGenerating}
+                    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2"
                   >
-                    Generate Games ({Math.floor(players.length / 4)} possible)
+                    {isGenerating ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Generating...
+                      </>
+                    ) : (
+                      `Generate Games (${Math.floor(players.length / 4)} possible)`
+                    )}
                   </button>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col items-center">
-                      <span className="text-xs font-bold text-zinc-600 mb-1">TARGET</span>
+                      <span className="text-xs font-bold text-zinc-600 mb-1">TARGET SCORE</span>
                       <span className="bg-green-600 text-black px-4 py-2 rounded-xl font-black">
                         {currentGame?.targetScore}
                       </span>
@@ -790,9 +871,9 @@ useEffect(() => {
                         <div className="absolute left-1/2 top-0 bottom-0 w-1.5 bg-white" />
                         <div className="absolute top-1/2 left-0 right-0 h-1.5 bg-white" />
                         <div className="absolute left-[28%] top-0 bottom-0 w-0.5 bg-yellow-400" />
-                        <div className="absolute left-[28%] top-[40%] bottom-[45%] h-0.5 bg-yellow-400" />
+                        <div className="absolute left-[28%] top-[20%] bottom-[45%] h-0.5 bg-yellow-400" />
                         <div className="absolute left-[72%] top-0 bottom-0 w-0.5 bg-yellow-400" />
-                        <div className="absolute left-[72%] top-[40%] bottom-[45%] h-0.5 bg-yellow-400" />
+                        <div className="absolute left-[72%] top-[20%] bottom-[45%] h-0.5 bg-yellow-400" />
 
                         <div className="absolute left-1 top-1">
                           <span className="bg-blue-600 text-white px-2 py-1 rounded-lg font-black text-sm">TEAM A</span>
@@ -957,6 +1038,7 @@ useEffect(() => {
                             <tr 
                               key={g.id} 
                               className={`border-b border-zinc-100 ${
+                                completedGames.has(g.id) ? 'bg-zinc-200 opacity-60' :
                                 g.status === 'active' ? 'bg-green-100' : 
                                 idx < currentGameIndex ? 'bg-zinc-100' : 'bg-white'
                               }`}
@@ -1109,7 +1191,24 @@ useEffect(() => {
                                   </button>
                                 )}
                                 {g.status === 'finished' && (
-                                  <span className="text-zinc-900 text-xs">Done</span>
+                                  completedGames.has(g.id) ? (
+                                    <span className="text-zinc-400 text-xs">Completed</span>
+                                  ) : (
+                                    <div className="flex gap-1 justify-center">
+                                      <button
+                                        onClick={() => handleGameDone(g.id)}
+                                        className="bg-zinc-500 hover:bg-zinc-600 text-white font-bold py-1 px-2 rounded-lg text-xs"
+                                      >
+                                        Done
+                                      </button>
+                                      <button
+                                        onClick={() => handleNewSet(g.id)}
+                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 rounded-lg text-xs"
+                                      >
+                                        New Set
+                                      </button>
+                                    </div>
+                                  )
                                 )}
                               </td>
                             </tr>
@@ -1123,9 +1222,20 @@ useEffect(() => {
                     {games.length > 0 && games.every(g => g.status === 'pending') && (
                       <button
                         onClick={regeneratePairing}
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-xl"
+                        disabled={isGenerating}
+                        className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-zinc-300 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-2"
                       >
-                        Regenerate Pairing
+                        {isGenerating ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            Generating...
+                          </>
+                        ) : (
+                          'Regenerate Pairing'
+                        )}
                       </button>
                     )}
                     {games.length > 0 && games.every(g => g.status === 'finished') && (
