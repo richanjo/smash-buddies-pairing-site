@@ -130,6 +130,10 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [completedGames, setCompletedGames] = useState<Set<number>>(new Set());
   const [isLoaded, setIsLoaded] = useState(false);
+  const [showRemovePlayerModal, setShowRemovePlayerModal] = useState(false);
+  const [playerToRemove, setPlayerToRemove] = useState<Player | null>(null);
+  const [isEditingTargetScore, setIsEditingTargetScore] = useState(false);
+  const [tempTargetScore, setTempTargetScore] = useState('');
 
   useEffect(() => {
     setIsLoaded(true);
@@ -238,7 +242,78 @@ useEffect(() => {
   };
 
   const removePlayer = (id: string) => {
-    setPlayers(players.filter(p => p.id !== id));
+    const player = players.find(p => p.id === id);
+    if (!player) return;
+
+    const activeGame = games.find(g => 
+      g.status === 'active' && 
+      (g.teamA.players.some(p => p.id === id) || g.teamB.players.some(p => p.id === id))
+    );
+
+    if (activeGame) {
+      setPlayerToRemove(player);
+      setShowRemovePlayerModal(true);
+    } else {
+      setPlayers(players.filter(p => p.id !== id));
+      const updatedGames = games.map(g => ({
+        ...g,
+        teamA: { ...g.teamA, players: g.teamA.players.filter(p => p.id !== id) },
+        teamB: { ...g.teamB, players: g.teamB.players.filter(p => p.id !== id) }
+      }));
+      setGames(updatedGames);
+    }
+  };
+
+  const confirmRemovePlayer = () => {
+    if (!playerToRemove) return;
+    setPlayers(players.filter(p => p.id !== playerToRemove.id));
+    setShowRemovePlayerModal(false);
+    setPlayerToRemove(null);
+  };
+
+  const stopGameAndRemove = () => {
+    const activeGameIndex = games.findIndex(g => g.status === 'active');
+    if (activeGameIndex !== -1) {
+      const updatedGames = [...games];
+      updatedGames[activeGameIndex] = {
+        ...updatedGames[activeGameIndex],
+        status: 'pending',
+      };
+      setGames(updatedGames);
+      setTimer(0);
+      setTimerRunning(false);
+    }
+    setShowRemovePlayerModal(false);
+    if (playerToRemove) {
+      setPlayers(players.filter(p => p.id !== playerToRemove.id));
+      setPlayerToRemove(null);
+    }
+  };
+
+  const closeRemoveModal = () => {
+    setShowRemovePlayerModal(false);
+    setPlayerToRemove(null);
+  };
+
+  const saveTargetScore = () => {
+    const newScore = parseInt(tempTargetScore);
+    if (isNaN(newScore) || newScore < 1) {
+      alert('Please enter a valid score');
+      return;
+    }
+    const updatedGames = [...games];
+    if (currentGame) {
+      const gameIdx = games.findIndex(g => g.id === currentGame.id);
+      if (gameIdx !== -1) {
+        updatedGames[gameIdx] = {
+          ...updatedGames[gameIdx],
+          targetScore: newScore,
+        };
+        setGames(updatedGames);
+      }
+    }
+    setIsEditingTargetScore(false);
+    setTempTargetScore('');
   };
 
   const updatePlayerSkill = (id: string, skill: SkillLevel) => {
@@ -326,6 +401,14 @@ useEffect(() => {
 
   const startGame = () => {
     if (!currentGame) return;
+    
+    if (currentGame.teamA.players.length < 2 || currentGame.teamB.players.length < 2) {
+      setEditingGameId(currentGame.id);
+      setEditingTeamA([...currentGame.teamA.players]);
+      setEditingTeamB([...currentGame.teamB.players]);
+      return;
+    }
+
     const updatedGames = [...games];
     updatedGames[currentGameIndex] = {
       ...updatedGames[currentGameIndex],
@@ -334,6 +417,32 @@ useEffect(() => {
       teamB: { ...updatedGames[currentGameIndex].teamB, score: 0 },
     };
     setGames(updatedGames);
+    setTimer(0);
+    setTimerRunning(true);
+    setHistory([]);
+  };
+
+  const startGameById = (gameId: number) => {
+    const gameIdx = games.findIndex(g => g.id === gameId);
+    if (gameIdx === -1) return;
+    const game = games[gameIdx];
+    
+    if (game.teamA.players.length < 2 || game.teamB.players.length < 2) {
+      setEditingGameId(game.id);
+      setEditingTeamA([...game.teamA.players]);
+      setEditingTeamB([...game.teamB.players]);
+      return;
+    }
+    
+    const updatedGames = [...games];
+    updatedGames[gameIdx] = {
+      ...updatedGames[gameIdx],
+      status: 'active',
+      teamA: { ...updatedGames[gameIdx].teamA, score: 0 },
+      teamB: { ...updatedGames[gameIdx].teamB, score: 0 },
+    };
+    setGames(updatedGames);
+    setCurrentGameIndex(gameIdx);
     setTimer(0);
     setTimerRunning(true);
     setHistory([]);
@@ -350,23 +459,6 @@ useEffect(() => {
       winner: null,
     };
     setGames(updatedGames);
-    setTimer(0);
-    setTimerRunning(true);
-    setHistory([]);
-  };
-
-  const startGameById = (gameId: number) => {
-    const gameIdx = games.findIndex(g => g.id === gameId);
-    if (gameIdx === -1) return;
-    const updatedGames = [...games];
-    updatedGames[gameIdx] = {
-      ...updatedGames[gameIdx],
-      status: 'active',
-      teamA: { ...updatedGames[gameIdx].teamA, score: 0 },
-      teamB: { ...updatedGames[gameIdx].teamB, score: 0 },
-    };
-    setGames(updatedGames);
-    setCurrentGameIndex(gameIdx);
     setTimer(0);
     setTimerRunning(true);
     setHistory([]);
@@ -740,7 +832,8 @@ useEffect(() => {
                           <td className="px-3 py-2 text-right">
                             <button
                               onClick={() => removePlayer(player.id)}
-                              className="text-zinc-900 hover:text-red-500 text-xl leading-none"
+                              disabled={games.length > 0}
+                              className={`text-xl leading-none ${games.length > 0 ? 'text-zinc-300 cursor-not-allowed' : 'text-zinc-900 hover:text-red-500'}`}
                             >
                               ×
                             </button>
@@ -836,9 +929,36 @@ useEffect(() => {
                   <div className="flex items-center justify-between">
                     <div className="flex flex-col items-center">
                       <span className="text-xs font-bold text-zinc-600 mb-1">TARGET SCORE</span>
-                      <span className="bg-green-600 text-black px-4 py-2 rounded-xl font-black">
-                        {currentGame?.targetScore}
-                      </span>
+                      {isEditingTargetScore ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={tempTargetScore}
+                            onChange={(e) => setTempTargetScore(e.target.value)}
+                            className="w-16 px-2 py-1 text-center bg-white border-2 border-green-500 rounded-lg font-black text-black"
+                            autoFocus
+                          />
+                          <button
+                            onClick={saveTargetScore}
+                            className="bg-green-600 text-white px-2 py-1 rounded-lg font-bold text-xs"
+                          >
+                            OK
+                          </button>
+                          <button
+                            onClick={() => { setIsEditingTargetScore(false); setTempTargetScore(''); }}
+                            className="bg-zinc-500 text-white px-2 py-1 rounded-lg font-bold text-xs"
+                          >
+                            X
+                          </button>
+                        </div>
+                      ) : (
+                        <span 
+                          onClick={() => { if (currentGame?.status === 'pending') { setTempTargetScore(currentGame.targetScore.toString()); setIsEditingTargetScore(true); }}}
+                          className={`bg-green-600 text-black px-4 py-2 rounded-xl font-black cursor-pointer ${currentGame?.status !== 'pending' ? 'cursor-not-allowed opacity-70' : 'hover:bg-green-700'}`}
+                        >
+                          {currentGame?.targetScore}
+                        </span>
+                      )}
                     </div>
                     <div className="bg-black px-3 py-1.5 rounded-lg">
                       <span className="text-green-400 font-mono font-bold">{formatTime(timer)}</span>
@@ -871,9 +991,9 @@ useEffect(() => {
                         <div className="absolute left-1/2 top-0 bottom-0 w-1.5 bg-white" />
                         <div className="absolute top-1/2 left-0 right-0 h-1.5 bg-white" />
                         <div className="absolute left-[28%] top-0 bottom-0 w-0.5 bg-yellow-400" />
-                        <div className="absolute left-[28%] top-[20%] bottom-[45%] h-0.5 bg-yellow-400" />
+                        <div className="absolute left-[28%] top-[15%] bottom-[45%] h-0.5 bg-yellow-400" />
                         <div className="absolute left-[72%] top-0 bottom-0 w-0.5 bg-yellow-400" />
-                        <div className="absolute left-[72%] top-[20%] bottom-[45%] h-0.5 bg-yellow-400" />
+                        <div className="absolute left-[72%] top-[15%] bottom-[45%] h-0.5 bg-yellow-400" />
 
                         <div className="absolute left-1 top-1">
                           <span className="bg-blue-600 text-white px-2 py-1 rounded-lg font-black text-sm">TEAM A</span>
@@ -882,44 +1002,44 @@ useEffect(() => {
                           <span className="bg-rose-600 text-white px-2 py-1 rounded-lg font-black text-sm">TEAM B</span>
                         </div>
 
-                        <div className="absolute left-[10%] top-[15%] flex flex-col items-center gap-1">
+                        <div className="absolute left-[10%] top-[15%] flex flex-col items-center gap-0.5">
                           {currentGame.teamA.players[0] ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-col items-center">
                               <span className="text-lg">{currentGame.teamA.players[0].gender === 'Male' ? '👨' : '👩'}</span>
-                              <div className="text-sm font-black text-white">{currentGame.teamA.players[0].name}</div>
+                              <div className="text-sm font-bold text-white">{currentGame.teamA.players[0].name}</div>
                             </div>
                           ) : (
                             <div className="text-sm font-bold text-zinc-900">TBD</div>
                           )}
                         </div>
 
-                        <div className="absolute left-[10%] bottom-[15%] flex flex-col items-center gap-1">
+                        <div className="absolute left-[10%] bottom-[15%] flex flex-col items-center gap-0.5">
                           {currentGame.teamA.players[1] ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-col items-center">
                               <span className="text-lg">{currentGame.teamA.players[1].gender === 'Male' ? '👨' : '👩'}</span>
-                              <div className="text-sm font-black text-white">{currentGame.teamA.players[1].name}</div>
+                              <div className="text-sm font-bold text-white">{currentGame.teamA.players[1].name}</div>
                             </div>
                           ) : (
                             <div className="text-sm font-bold text-zinc-900">TBD</div>
                           )}
                         </div>
 
-                        <div className="absolute right-[10%] top-[15%] flex flex-col items-center gap-1">
+                        <div className="absolute right-[10%] top-[15%] flex flex-col items-center gap-0.5">
                           {currentGame.teamB.players[0] ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-col items-center">
                               <span className="text-lg">{currentGame.teamB.players[0].gender === 'Male' ? '👨' : '👩'}</span>
-                              <div className="text-sm font-black text-white">{currentGame.teamB.players[0].name}</div>
+                              <div className="text-sm font-bold text-white">{currentGame.teamB.players[0].name}</div>
                             </div>
                           ) : (
                             <div className="text-sm font-bold text-zinc-900">TBD</div>
                           )}
                         </div>
 
-                        <div className="absolute right-[10%] bottom-[15%] flex flex-col items-center gap-1">
+                        <div className="absolute right-[10%] bottom-[15%] flex flex-col items-center gap-0.5">
                           {currentGame.teamB.players[1] ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-col items-center">
                               <span className="text-lg">{currentGame.teamB.players[1].gender === 'Male' ? '👨' : '👩'}</span>
-                              <div className="text-sm font-black text-white">{currentGame.teamB.players[1].name}</div>
+                              <div className="text-sm font-bold text-white">{currentGame.teamB.players[1].name}</div>
                             </div>
                           ) : (
                             <div className="text-sm font-bold text-zinc-900">TBD</div>
@@ -972,14 +1092,7 @@ useEffect(() => {
                         </div>
                       )}
 
-                      {currentGame.status === 'pending' && (
-                        <button
-                          onClick={startGame}
-                          className="w-full bg-green-600 hover:bg-green-700 text-white font-black py-3 rounded-xl mt-4"
-                        >
-                          Start Game
-                        </button>
-                      )}
+                      
 
                       {showWinnerModal && currentGame.status === 'finished' && (
                         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1001,6 +1114,33 @@ useEffect(() => {
                               >
                                 Close
                               </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {showRemovePlayerModal && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm mx-4">
+                            <div className="text-center">
+                              <div className="text-xl font-black text-red-600 mb-2">Player in Active Game</div>
+                              <div className="text-zinc-600 mb-4">
+                                "{playerToRemove?.name}" is currently playing in an ongoing game.
+                              </div>
+                              <div className="flex gap-2 justify-center">
+                                <button
+                                  onClick={stopGameAndRemove}
+                                  className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-xl"
+                                >
+                                  Stop Game & Remove
+                                </button>
+                                <button
+                                  onClick={closeRemoveModal}
+                                  className="bg-zinc-500 hover:bg-zinc-600 text-white font-bold py-2 px-4 rounded-xl"
+                                >
+                                  Close
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
